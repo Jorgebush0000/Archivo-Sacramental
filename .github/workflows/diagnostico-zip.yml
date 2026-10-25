@@ -1,0 +1,44 @@
+name: Diagnosticar ZIP del proyecto
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostico:
+    runs-on: windows-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Buscar y revisar ZIP
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Path . -Filter "*.zip" -File | Select-Object -First 1
+          if (-not $zip) {
+            throw "No se encontró ningún ZIP en la raíz del repositorio."
+          }
+          $dest = "$env:RUNNER_TEMP\proyecto"
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $dest -Force
+          $report = "$env:RUNNER_TEMP\diagnostico.txt"
+          "ZIP: $($zip.Name)" | Out-File $report
+          "`nARCHIVOS PRINCIPALES:" | Out-File $report -Append
+          Get-ChildItem $dest -Force | Select-Object Name, Mode | Format-Table -AutoSize | Out-String | Out-File $report -Append
+          "`nPACKAGE.JSON:" | Out-File $report -Append
+          $packages = Get-ChildItem $dest -Filter "package.json" -File -Recurse
+          foreach ($pkg in $packages) {
+            "`n--- $($pkg.FullName) ---" | Out-File $report -Append
+            Get-Content $pkg.FullName | Out-File $report -Append
+          }
+          if (-not $packages) {
+            "No se encontró package.json." | Out-File $report -Append
+          }
+      - name: Guardar informe
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: informe-diagnostico-zip
+          path: ${{ runner.temp }}\diagnostico.txt
+          if-no-files-found: warn
