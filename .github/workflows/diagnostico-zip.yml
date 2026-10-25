@@ -16,25 +16,37 @@ jobs:
       - name: Buscar y revisar ZIP
         shell: pwsh
         run: |
-          $zip = Get-ChildItem -Path . -Filter "*.zip" -File | Select-Object -First 1
+          $report = Join-Path $env:RUNNER_TEMP 'diagnostico.txt'
+
+          $zip = Get-ChildItem -Path . -Filter '*.zip' -File | Select-Object -First 1
           if (-not $zip) {
+            "No se encontró ningún ZIP en la raíz del repositorio." | Out-File $report -Encoding utf8
             throw "No se encontró ningún ZIP en la raíz del repositorio."
           }
-          $dest = "$env:RUNNER_TEMP\proyecto"
+
+          $dest = Join-Path $env:RUNNER_TEMP 'proyecto'
+          if (Test-Path $dest) {
+            Remove-Item $dest -Recurse -Force
+          }
+
           Expand-Archive -LiteralPath $zip.FullName -DestinationPath $dest -Force
-          $report = "$env:RUNNER_TEMP\diagnostico.txt"
-          "ZIP: $($zip.Name)" | Out-File $report
-          "`nARCHIVOS PRINCIPALES:" | Out-File $report -Append
-          Get-ChildItem $dest -Force | Select-Object Name, Mode | Format-Table -AutoSize | Out-String | Out-File $report -Append
-          "`nPACKAGE.JSON:" | Out-File $report -Append
-          $packages = Get-ChildItem $dest -Filter "package.json" -File -Recurse
-          foreach ($pkg in $packages) {
-            "`n--- $($pkg.FullName) ---" | Out-File $report -Append
-            Get-Content $pkg.FullName | Out-File $report -Append
+
+          "ZIP: $($zip.Name)" | Out-File $report -Encoding utf8
+          "`r`nARCHIVOS PRINCIPALES:" | Out-File $report -Append -Encoding utf8
+          Get-ChildItem $dest -Force | Select-Object Name, Mode | Format-Table -AutoSize | Out-String | Out-File $report -Append -Encoding utf8
+
+          "`r`nPACKAGE.JSON:" | Out-File $report -Append -Encoding utf8
+          $packages = Get-ChildItem $dest -Filter 'package.json' -File -Recurse
+
+          if ($packages) {
+            foreach ($pkg in $packages) {
+              "`r`n--- $($pkg.FullName) ---" | Out-File $report -Append -Encoding utf8
+              Get-Content -LiteralPath $pkg.FullName | Out-File $report -Append -Encoding utf8
+            }
+          } else {
+            "No se encontró package.json." | Out-File $report -Append -Encoding utf8
           }
-          if (-not $packages) {
-            "No se encontró package.json." | Out-File $report -Append
-          }
+
       - name: Guardar informe
         if: always()
         uses: actions/upload-artifact@v4
