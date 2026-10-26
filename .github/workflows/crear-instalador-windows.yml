@@ -1,107 +1,70 @@
 name: Crear instalador Windows
 
 on:
-workflow_dispatch:
-push:
-branches:
-- main
+  workflow_dispatch:
+  push:
+    branches:
+      - main
 
 permissions:
-contents: read
+  contents: read
 
 jobs:
-build:
-runs-on: windows-latest
+  build:
+    runs-on: windows-latest
 
-steps:
-  - name: Descargar repositorio
-    uses: actions/checkout@v4
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
 
-  - name: Preparar Node.js
-    uses: actions/setup-node@v4
-    with:
-      node-version: 20
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-  - name: Extraer proyecto
-    shell: pwsh
-    run: |
-      $zip = Join-Path $env:GITHUB_WORKSPACE "Archivo-Sacramental-Genealogico-v2.1.0-completo.zip"
-      if (!(Test-Path $zip)) {
-        throw "No se encontró el ZIP del proyecto."
-      }
+      - name: Extraer proyecto
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:GITHUB_WORKSPACE "Archivo-Sacramental-Genealogico-v2.1.0-completo.zip"
+          if (!(Test-Path $zip)) {
+            throw "No se encontró el ZIP del proyecto."
+          }
 
-      $destino = Join-Path $env:RUNNER_TEMP "ArchivoSacramental"
-      Expand-Archive -LiteralPath $zip -DestinationPath $destino -Force
+          $destino = Join-Path $env:RUNNER_TEMP "ArchivoSacramental"
+          Expand-Archive -LiteralPath $zip -DestinationPath $destino -Force
 
-      $pkg = Get-ChildItem -Path $destino -Filter package.json -Recurse -File |
-        Select-Object -First 1
+          $pkg = Get-ChildItem -Path $destino -Filter package.json -Recurse -File |
+            Select-Object -First 1
 
-      if (!$pkg) {
-        throw "El ZIP no contiene package.json."
-      }
+          if (!$pkg) {
+            throw "El ZIP no contiene package.json."
+          }
 
-      "PROJECT_DIR=$($pkg.Directory.FullName)" |
-        Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PROJECT_DIR=$($pkg.Directory.FullName)" |
+            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-  - name: Corregir exportación de App
-    shell: pwsh
-    run: |
-      Set-Location $env:PROJECT_DIR
-      $app = Join-Path $env:PROJECT_DIR "src/App.tsx"
-      $main = Join-Path $env:PROJECT_DIR "src/main.tsx"
+      - name: Mostrar código que debemos corregir
+        shell: pwsh
+        run: |
+          $app = Join-Path $env:PROJECT_DIR "src/App.tsx"
+          $main = Join-Path $env:PROJECT_DIR "src/main.tsx"
 
-      if (!(Test-Path $app) -or !(Test-Path $main)) {
-        throw "No se encontraron src/App.tsx y src/main.tsx."
-      }
+          if (!(Test-Path $app)) {
+            throw "No se encontró src/App.tsx."
+          }
 
-      $appText = Get-Content $app -Raw
-      if ($appText -notmatch 'export\s+default\s+App') {
-        if ($appText -match 'function\s+App\s*\(') {
-          $appText = [regex]::Replace($appText, 'function\s+App\s*\(', 'function App(', 1)
-          $appText += "`r`nexport default App;`r`n"
-        } elseif ($appText -match 'const\s+App\s*=') {
-          $appText += "`r`nexport default App;`r`n"
-        } else {
-          throw "No pude identificar cómo se declara App. Hay que revisar el archivo."
-        }
-        Set-Content -Path $app -Value $appText -Encoding utf8
-      }
+          Write-Host "===== src/App.tsx: líneas 235 a 265 ====="
+          $lines = Get-Content $app
+          $start = [Math]::Max(0, 234)
+          $end = [Math]::Min($lines.Length - 1, 264)
 
-  - name: Mostrar error de propiedad duplicada
-    shell: pwsh
-    run: |
-      Set-Location $env:PROJECT_DIR
-      $app = Join-Path $env:PROJECT_DIR "src/App.tsx"
-      $lines = Get-Content $app
-      $start = [Math]::Max(0, 249 - 12)
-      $end = [Math]::Min($lines.Length - 1, 249 + 12)
-      for ($i = $start; $i -le $end; $i++) {
-        Write-Host ("App.tsx:{0}: {1}" -f ($i + 1), $lines[$i])
-      }
-      throw "Revisión detenida intencionalmente: hay que identificar la propiedad duplicada en App.tsx antes de compilar."
+          for ($i = $start; $i -le $end; $i++) {
+            Write-Host ("Línea {0}: {1}" -f ($i + 1), $lines[$i])
+          }
 
-  - name: Instalar dependencias
-    shell: pwsh
-    run: |
-      Set-Location $env:PROJECT_DIR
-      if (Test-Path "package-lock.json") {
-        npm ci
-      } else {
-        npm install
-      }
+          Write-Host "===== src/main.tsx ====="
+          if (Test-Path $main) {
+            Get-Content $main
+          }
 
-  - name: Crear instalador
-    shell: pwsh
-    run: |
-      Set-Location $env:PROJECT_DIR
-      npm run dist:win
-
-  - name: Guardar instalador
-    uses: actions/upload-artifact@v4
-    with:
-      name: Archivo-Sacramental-Instalador-Windows
-      path: |
-        ${{ env.PROJECT_DIR }}/dist/**/*.exe
-        ${{ env.PROJECT_DIR }}/release/**/*.exe
-      if-no-files-found: error
-      retention-days: 14
+          throw "Diagnóstico detenido. Necesitamos corregir el código señalado antes de compilar."
