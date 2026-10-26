@@ -17,12 +17,14 @@ jobs:
 
     steps:
       - name: Descargar repositorio
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Preparar Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
 
       - name: Extraer proyecto del ZIP
         shell: pwsh
@@ -30,7 +32,7 @@ jobs:
           $zip = Join-Path $env:GITHUB_WORKSPACE $env:ZIP_NAME
 
           if (-not (Test-Path $zip)) {
-            throw "No se encontró el ZIP del proyecto: $zip"
+            throw "No se encontró el ZIP: $zip"
           }
 
           $destino = Join-Path $env:RUNNER_TEMP "ArchivoSacramental"
@@ -41,7 +43,7 @@ jobs:
 
           Expand-Archive -LiteralPath $zip -DestinationPath $destino -Force
 
-          $pkg = Get-ChildItem -Path $destino -Filter package.json -Recurse -File |
+          $pkg = Get-ChildItem $destino -Filter package.json -Recurse -File |
             Select-Object -First 1
 
           if (-not $pkg) {
@@ -49,7 +51,56 @@ jobs:
           }
 
           "PROJECT_DIR=$($pkg.Directory.FullName)" |
-            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Corregir importación de App
+        shell: pwsh
+        run: |
+          $app = Join-Path $env:PROJECT_DIR "src/App.tsx"
+          $main = Join-Path $env:PROJECT_DIR "src/main.tsx"
+
+          if (-not (Test-Path $app)) {
+            throw "No se encontró src/App.tsx: $app"
+          }
+
+          if (-not (Test-Path $main)) {
+            throw "No se encontró src/main.tsx: $main"
+          }
+
+          $appText = Get-Content $app -Raw
+          $mainText = Get-Content $main -Raw
+
+          $hasDefault = $appText -match '(?m)\bexport\s+default\b'
+          $hasNamedApp = (
+            $appText -match '(?m)\bexport\s+(const|let|var|function|class)\s+App\b'
+          ) -or (
+            $appText -match '(?m)\bexport\s*\{[^}]*\bApp\b[^}]*\}'
+          )
+
+          if (-not $hasDefault -and $hasNamedApp) {
+            $pattern = '(?m)^[ \t]*import[ \t]+App[ \t]+from[ \t]+([''"])\./App\1[ \t]*;?[ \t]*$'
+
+            $fixed = [regex]::Replace(
+              $mainText,
+              $pattern,
+              'import { App } from "./App"'
+            )
+
+            if ($fixed -eq $mainText -and $mainText -match 'import\s+App\s+from') {
+              throw "App tiene exportación nombrada, pero no se pudo corregir el import automáticamente."
+            }
+
+            if ($fixed -ne $mainText) {
+              Set-Content -Path $main -Value $fixed -Encoding utf8
+              Write-Host "Importación de App corregida a exportación nombrada."
+            }
+          }
+          elseif (-not $hasDefault -and -not $hasNamedApp) {
+            throw "App.tsx no muestra una exportación predeterminada ni una exportación nombrada reconocible. Hay que revisar ese archivo."
+          }
+          else {
+            Write-Host "App.tsx tiene exportación predeterminada; no se cambia el import."
+          }
 
       - name: Instalar dependencias
         shell: pwsh
@@ -57,35 +108,42 @@ jobs:
           Set-Location $env:PROJECT_DIR
           npm install
 
-      - name: Corregir problema en App.tsx si existe
-        shell: pwsh
-        run: |
-          $app = Join-Path $env:PROJECT_DIR "src/App.tsx"
-
-          if (Test-Path $app) {
-            $txt = Get-Content -Path $app -Raw
-            $fixed = [regex]::Replace($txt, "toYear:''\s*,\s*\[key\]:value", "toYear:''")
-
-            if ($fixed -ne $txt) {
-              Set-Content -Path $app -Value $fixed -Encoding utf8
-              Write-Host "Propiedad duplicada corregida."
-            } else {
-              Write-Host "No se encontró el patrón duplicado; se omite."
-            }
-          } else {
-            Write-Host "No existe src/App.tsx; se omite la corrección."
-          }
-
       - name: Compilar y generar instalador EXE
         shell: pwsh
         run: |
           Set-Location $env:PROJECT_DIR
           npm run dist:win
 
-      - name: Subir artefacto del instalador
+      - name: Preparar instalador para descargar
+        shell: pwsh
+        run: |
+          $release = Join-Path $env:PROJECT_DIR "release"
+          $salida = Join-Path $env:RUNNER_TEMP "instalador-windows"
+
+          if (-not (Test-Path $release)) {
+            throw "No existe la carpeta release después de compilar."
+          }
+
+          if (Test-Path $salida) {
+            Remove-Item $salida -Recurse -Force
+          }
+
+          New-Item -ItemType Directory -Path $salida -Force | Out-Null
+
+          $archivos = Get-ChildItem $release -File -Recurse |
+            Where-Object { $_.Extension -in '.exe', '.zip' }
+
+          if (-not ($archivos | Where-Object { $_.Extension -eq '.exe' })) {
+            throw "La compilación no produjo ningún instalador .exe."
+          }
+
+          $archivos | Copy-Item -Destination $salida -Force
+          Get-ChildItem $salida
+
+      - name: Subir instalador
         uses: actions/upload-artifact@v4
         with:
           name: instalador-windows
-          path: |
-            ${{ env.PROJECT_DIR }}/release/*.exe
-            ${{ env.PROJECT_DIR }}/release/*.zip
+          path: ${{ runner.temp }}/instalador-windows/*
+          if-no-files-found: error
+          retention-days: 14
