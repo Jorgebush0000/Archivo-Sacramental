@@ -1,0 +1,77 @@
+name: Crear instalador Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Extraer proyecto
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:GITHUB_WORKSPACE "Archivo-Sacramental-Genealogico-v2.1.0-completo.zip"
+          if (!(Test-Path $zip)) {
+            throw "No se encontró el ZIP del proyecto."
+          }
+
+          $destino = Join-Path $env:RUNNER_TEMP "ArchivoSacramental"
+          Expand-Archive -LiteralPath $zip -DestinationPath $destino -Force
+
+          $pkg = Get-ChildItem -Path $destino -Filter package.json -Recurse -File |
+            Select-Object -First 1
+
+          if (!$pkg) {
+            throw "El ZIP no contiene package.json."
+          }
+
+          "PROJECT_DIR=$($pkg.Directory.FullName)" |
+            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Instalar dependencias
+        shell: pwsh
+        run: |
+          Set-Location $env:PROJECT_DIR
+
+          if (Test-Path "package-lock.json") {
+            npm ci
+          } else {
+            npm install
+          }
+
+      - name: Comprobar configuración
+        shell: pwsh
+        run: |
+          Set-Location $env:PROJECT_DIR
+          npm pkg get scripts
+
+      - name: Crear instalador
+        shell: pwsh
+        run: |
+          Set-Location $env:PROJECT_DIR
+          npm run dist:win
+
+      - name: Guardar instalador
+        uses: actions/upload-artifact@v4
+        with:
+          name: Archivo-Sacramental-Instalador-Windows
+          path: |
+            ${{ env.PROJECT_DIR }}/dist/**/*.exe
+            ${{ env.PROJECT_DIR }}/release/**/*.exe
+          if-no-files-found: error
+          retention-days: 14
