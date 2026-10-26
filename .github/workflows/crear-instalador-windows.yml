@@ -19,12 +19,12 @@ jobs:
       - name: Descargar repositorio
         uses: actions/checkout@v5
 
+      
       - name: Preparar Node.js
         uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: '**/package-lock.json'
+
 
       - name: Extraer proyecto del ZIP
         shell: pwsh
