@@ -43,13 +43,17 @@ jobs:
           "PROJECT_DIR=$($pkg.Directory.FullName)" |
             Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-            - name: Corregir propiedad duplicada
+      - name: Corregir propiedad duplicada
         shell: pwsh
         run: |
           $app = Join-Path $env:PROJECT_DIR "src/App.tsx"
-          $appText = Get-Content $app -Raw
 
-          $corregido = $appText -replace "toYear:''\s*,\s*\[key\]:value", "toYear:''"
+          if (!(Test-Path $app)) {
+            throw "No se encontró src/App.tsx en el proyecto extraído."
+          }
+
+          $appText = Get-Content -Path $app -Raw
+          $corregido = [regex]::Replace($appText, "toYear:''\s*,\s*\[key\]:value", "toYear:''")
 
           if ($corregido -eq $appText) {
             throw "No se encontró el fragmento esperado para corregir. No se modificó el archivo."
@@ -57,20 +61,3 @@ jobs:
 
           Set-Content -Path $app -Value $corregido -Encoding utf8
           Write-Host "Propiedad duplicada corregida."
-          }
-
-          Write-Host "===== src/App.tsx: líneas 235 a 265 ====="
-          $lines = Get-Content $app
-          $start = [Math]::Max(0, 234)
-          $end = [Math]::Min($lines.Length - 1, 264)
-
-          for ($i = $start; $i -le $end; $i++) {
-            Write-Host ("Línea {0}: {1}" -f ($i + 1), $lines[$i])
-          }
-
-          Write-Host "===== src/main.tsx ====="
-          if (Test-Path $main) {
-            Get-Content $main
-          }
-
-          throw "Diagnóstico detenido. Necesitamos corregir el código señalado antes de compilar."
