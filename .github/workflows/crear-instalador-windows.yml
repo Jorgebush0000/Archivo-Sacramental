@@ -53,54 +53,46 @@ jobs:
           "PROJECT_DIR=$($pkg.Directory.FullName)" |
             Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Corregir importación de App
+      
+      - name: Corregir exportación de App
         shell: pwsh
         run: |
           $app = Join-Path $env:PROJECT_DIR "src/App.tsx"
           $main = Join-Path $env:PROJECT_DIR "src/main.tsx"
 
           if (-not (Test-Path $app)) {
-            throw "No se encontró src/App.tsx: $app"
+            throw "No se encontró src/App.tsx."
           }
 
           if (-not (Test-Path $main)) {
-            throw "No se encontró src/main.tsx: $main"
+            throw "No se encontró src/main.tsx."
           }
 
           $appText = Get-Content $app -Raw
           $mainText = Get-Content $main -Raw
 
-          $hasDefault = $appText -match '(?m)\bexport\s+default\b'
-          $hasNamedApp = (
-            $appText -match '(?m)\bexport\s+(const|let|var|function|class)\s+App\b'
+          if ($appText -match '(?m)\bexport\s+default\b') {
+            Write-Host "Ya existe una exportación predeterminada."
+            exit 0
+          }
+
+          $hasAppDeclaration = (
+            $appText -match '(?m)^\s*(?:export\s+)?(?:const|let|var)\s+App\s*='
           ) -or (
-            $appText -match '(?m)\bexport\s*\{[^}]*\bApp\b[^}]*\}'
+            $appText -match '(?m)^\s*(?:export\s+)?function\s+App\s*\('
           )
 
-          if (-not $hasDefault -and $hasNamedApp) {
-            $pattern = '(?m)^[ \t]*import[ \t]+App[ \t]+from[ \t]+([''"])\./App\1[ \t]*;?[ \t]*$'
-
-            $fixed = [regex]::Replace(
-              $mainText,
-              $pattern,
-              'import { App } from "./App"'
-            )
-
-            if ($fixed -eq $mainText -and $mainText -match 'import\s+App\s+from') {
-              throw "App tiene exportación nombrada, pero no se pudo corregir el import automáticamente."
-            }
-
-            if ($fixed -ne $mainText) {
-              Set-Content -Path $main -Value $fixed -Encoding utf8
-              Write-Host "Importación de App corregida a exportación nombrada."
-            }
+          if ($hasAppDeclaration) {
+            Add-Content -Path $app -Value "`r`nexport default App;" -Encoding utf8
+            Write-Host "Se añadió export default App."
+            exit 0
           }
-          elseif (-not $hasDefault -and -not $hasNamedApp) {
-            throw "App.tsx no muestra una exportación predeterminada ni una exportación nombrada reconocible. Hay que revisar ese archivo."
-          }
-          else {
-            Write-Host "App.tsx tiene exportación predeterminada; no se cambia el import."
-          }
+
+          Write-Host "No se pudo identificar automáticamente el componente App."
+          Write-Host "Contenido inicial de App.tsx:"
+          Get-Content $app -TotalCount 100
+          throw "Se necesita identificar el componente exportado en App.tsx."
+
 
       - name: Instalar dependencias
         shell: pwsh
