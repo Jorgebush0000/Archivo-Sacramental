@@ -43,16 +43,11 @@ jobs:
           "PROJECT_DIR=$($pkg.Directory.FullName)" |
             Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Instalar dependencias
-        shell: pwsh
-        run: |
-          Set-Location $env:PROJECT_DIR
-          npm install
-
       - name: Corregir propiedad duplicada
         shell: pwsh
         run: |
           $app = Join-Path $env:PROJECT_DIR "src/App.tsx"
+
           if (!(Test-Path $app)) {
             throw "No se encontró src/App.tsx en el proyecto extraído."
           }
@@ -66,21 +61,3 @@ jobs:
 
           Set-Content -Path $app -Value $corregido -Encoding utf8
           Write-Host "Propiedad duplicada corregida."
-
-      - name: Compilar proyecto
-        shell: pwsh
-        run: |
-          Set-Location $env:PROJECT_DIR
-          npm run build
-
-      - name: Preparar instalador Windows
-        shell: pwsh
-        run: |
-          $proj = $env:PROJECT_DIR
-          $dist = Join-Path $proj "dist"
-
-          if (!(Test-Path $dist)) {
-            throw "No se encontró la carpeta dist tras compilar."
-          }
-
-          Write-Host "Proyecto listo para empaquetar."
