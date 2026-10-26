@@ -1,4 +1,4 @@
-name: Crear instalador Windows corregido
+name: Crear instalador Windows
 
 on:
   workflow_dispatch:
@@ -58,7 +58,7 @@ jobs:
           Set-Location $env:PROJECT_DIR
           npm install
 
-      - name: Corregir propiedad duplicada
+      - name: Corregir problema en App.tsx si existe
         shell: pwsh
         run: |
           $app = Join-Path $env:PROJECT_DIR "src/App.tsx"
@@ -77,28 +77,16 @@ jobs:
             Write-Host "No existe src/App.tsx; se omite la corrección."
           }
 
-      - name: Compilar la aplicación
+      - name: Compilar y generar instalador EXE
         shell: pwsh
         run: |
           Set-Location $env:PROJECT_DIR
+          npm run dist:win
 
-          $packageJsonPath = Join-Path $env:PROJECT_DIR "package.json"
-          $packageJson = Get-Content -Raw -Path $packageJsonPath | ConvertFrom-Json
-
-          $scripts = @{}
-          if ($packageJson.scripts) {
-            $scripts = $packageJson.scripts
-          }
-
-          if ($scripts.ContainsKey("electron:build")) {
-            npm run electron:build
-          }
-          elseif ($scripts.ContainsKey("tauri")) {
-            npm run tauri -- build
-          }
-          elseif ($scripts.ContainsKey("build")) {
-            npm run build
-          }
-          else {
-            throw "No se encontró un script de compilación válido en package.json."
-          }
+      - name: Subir artefacto del instalador
+        uses: actions/upload-artifact@v4
+        with:
+          name: instalador-windows
+          path: |
+            ${{ env.PROJECT_DIR }}/release/*.exe
+            ${{ env.PROJECT_DIR }}/release/*.zip
