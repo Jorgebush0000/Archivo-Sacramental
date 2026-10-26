@@ -43,14 +43,20 @@ jobs:
           "PROJECT_DIR=$($pkg.Directory.FullName)" |
             Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Mostrar código que debemos corregir
+            - name: Corregir propiedad duplicada
         shell: pwsh
         run: |
           $app = Join-Path $env:PROJECT_DIR "src/App.tsx"
-          $main = Join-Path $env:PROJECT_DIR "src/main.tsx"
+          $appText = Get-Content $app -Raw
 
-          if (!(Test-Path $app)) {
-            throw "No se encontró src/App.tsx."
+          $corregido = $appText -replace "toYear:''\s*,\s*\[key\]:value", "toYear:''"
+
+          if ($corregido -eq $appText) {
+            throw "No se encontró el fragmento esperado para corregir. No se modificó el archivo."
+          }
+
+          Set-Content -Path $app -Value $corregido -Encoding utf8
+          Write-Host "Propiedad duplicada corregida."
           }
 
           Write-Host "===== src/App.tsx: líneas 235 a 265 ====="
