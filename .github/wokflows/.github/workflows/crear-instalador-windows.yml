@@ -1,1 +1,92 @@
+name: Crear instalador Windows
 
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      ZIP_NAME: Archivo-Sacramental-Genealogico-v2.1.0-completo.zip
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Extraer proyecto del ZIP
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:GITHUB_WORKSPACE $env:ZIP_NAME
+
+          if (-not (Test-Path $zip)) {
+            throw "No se encontró el ZIP del proyecto: $zip"
+          }
+
+          $destino = Join-Path $env:RUNNER_TEMP "ArchivoSacramental"
+
+          if (Test-Path $destino) {
+            Remove-Item $destino -Recurse -Force
+          }
+
+          Expand-Archive -LiteralPath $zip -DestinationPath $destino -Force
+
+          $pkg = Get-ChildItem -Path $destino -Filter package.json -Recurse -File |
+            Select-Object -First 1
+
+          if (-not $pkg) {
+            throw "El ZIP no contiene package.json."
+          }
+
+          "PROJECT_DIR=$($pkg.Directory.FullName)" |
+            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Instalar dependencias
+        shell: pwsh
+        run: |
+          Set-Location $env:PROJECT_DIR
+          npm install
+
+      - name: Corregir problema en App.tsx si existe
+        shell: pwsh
+        run: |
+          $app = Join-Path $env:PROJECT_DIR "src/App.tsx"
+
+          if (Test-Path $app) {
+            $txt = Get-Content -Path $app -Raw
+            $fixed = [regex]::Replace($txt, "toYear:''\s*,\s*\[key\]:value", "toYear:''")
+
+            if ($fixed -ne $txt) {
+              Set-Content -Path $app -Value $fixed -Encoding utf8
+              Write-Host "Propiedad duplicada corregida."
+            } else {
+              Write-Host "No se encontró el patrón duplicado; se omite."
+            }
+          } else {
+            Write-Host "No existe src/App.tsx; se omite la corrección."
+          }
+
+      - name: Compilar y generar instalador EXE
+        shell: pwsh
+        run: |
+          Set-Location $env:PROJECT_DIR
+          npm run dist:win
+
+      - name: Subir artefacto del instalador
+        uses: actions/upload-artifact@v4
+        with:
+          name: instalador-windows
+          path: |
+            ${{ env.PROJECT_DIR }}/release/*.exe
+            ${{ env.PROJECT_DIR }}/release/*.zip
