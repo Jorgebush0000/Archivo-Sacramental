@@ -19,12 +19,10 @@ jobs:
       - name: Descargar repositorio
         uses: actions/checkout@v5
 
-      
       - name: Preparar Node.js
         uses: actions/setup-node@v5
         with:
           node-version: 22
-
 
       - name: Extraer proyecto del ZIP
         shell: pwsh
@@ -32,7 +30,7 @@ jobs:
           $zip = Join-Path $env:GITHUB_WORKSPACE $env:ZIP_NAME
 
           if (-not (Test-Path $zip)) {
-            throw "No se encontró el ZIP: $zip"
+            throw "No se encontró el ZIP del proyecto: $zip"
           }
 
           $destino = Join-Path $env:RUNNER_TEMP "ArchivoSacramental"
@@ -43,7 +41,7 @@ jobs:
 
           Expand-Archive -LiteralPath $zip -DestinationPath $destino -Force
 
-          $pkg = Get-ChildItem $destino -Filter package.json -Recurse -File |
+          $pkg = Get-ChildItem -Path $destino -Filter package.json -Recurse -File |
             Select-Object -First 1
 
           if (-not $pkg) {
@@ -51,10 +49,44 @@ jobs:
           }
 
           "PROJECT_DIR=$($pkg.Directory.FullName)" |
-            Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      
-      - name: Corregir exportación de App
+          Write-Host "Proyecto encontrado en: $($pkg.Directory.FullName)"
+
+      - name: Corregir propiedad duplicada en App.tsx
+        shell: pwsh
+        run: |
+          $app = Join-Path $env:PROJECT_DIR "src/App.tsx"
+
+          if (-not (Test-Path $app)) {
+            throw "No se encontró src/App.tsx."
+          }
+
+          $original = Get-Content -Path $app -Raw
+
+          # Corrige el patrón defectuoso conocido, si está presente.
+          $fixed = [regex]::Replace(
+            $original,
+            "toYear:''\s*,\s*\[key\]:value",
+            "toYear:''"
+          )
+
+          if ($fixed -ne $original) {
+            Set-Content -Path $app -Value $fixed -Encoding utf8
+            Write-Host "Se corrigió el patrón defectuoso."
+          }
+          else {
+            Write-Host "El patrón anterior no aparece. Se muestran las líneas 245-255:"
+            $lines = Get-Content -Path $app
+
+            for ($i = 244; $i -lt [Math]::Min(255, $lines.Count); $i++) {
+              Write-Host "$($i + 1): $($lines[$i])"
+            }
+
+            throw "No se pudo identificar automáticamente la propiedad duplicada. Revisa las líneas mostradas."
+          }
+
+      - name: Corregir importación de App
         shell: pwsh
         run: |
           $app = Join-Path $env:PROJECT_DIR "src/App.tsx"
@@ -68,31 +100,24 @@ jobs:
             throw "No se encontró src/main.tsx."
           }
 
-          $appText = Get-Content $app -Raw
-          $mainText = Get-Content $main -Raw
+          $appText = Get-Content -Path $app -Raw
+          $mainText = Get-Content -Path $main -Raw
 
           if ($appText -match '(?m)\bexport\s+default\b') {
-            Write-Host "Ya existe una exportación predeterminada."
-            exit 0
+            Write-Host "App.tsx ya tiene exportación predeterminada."
           }
-
-          $hasAppDeclaration = (
-            $appText -match '(?m)^\s*(?:export\s+)?(?:const|let|var)\s+App\s*='
-          ) -or (
+          elseif (
+            $appText -match '(?m)^\s*(?:export\s+)?(?:const|let|var)\s+App\s*=' -or
             $appText -match '(?m)^\s*(?:export\s+)?function\s+App\s*\('
-          )
-
-          if ($hasAppDeclaration) {
+          ) {
             Add-Content -Path $app -Value "`r`nexport default App;" -Encoding utf8
             Write-Host "Se añadió export default App."
-            exit 0
           }
-
-          Write-Host "No se pudo identificar automáticamente el componente App."
-          Write-Host "Contenido inicial de App.tsx:"
-          Get-Content $app -TotalCount 100
-          throw "Se necesita identificar el componente exportado en App.tsx."
-
+          else {
+            Write-Host "No se reconoce la declaración del componente App."
+            Get-Content -Path $app -TotalCount 100
+            throw "No se pudo corregir la exportación de App automáticamente."
+          }
 
       - name: Instalar dependencias
         shell: pwsh
@@ -106,31 +131,29 @@ jobs:
           Set-Location $env:PROJECT_DIR
           npm run dist:win
 
-      - name: Preparar instalador para descargar
+      - name: Preparar archivos del instalador
         shell: pwsh
         run: |
           $release = Join-Path $env:PROJECT_DIR "release"
           $salida = Join-Path $env:RUNNER_TEMP "instalador-windows"
 
           if (-not (Test-Path $release)) {
-            throw "No existe la carpeta release después de compilar."
+            throw "No se creó la carpeta release."
           }
 
-          if (Test-Path $salida) {
-            Remove-Item $salida -Recurse -Force
+          $archivos = @(
+            Get-ChildItem -Path $release -File -Recurse |
+              Where-Object { $_.Extension -in '.exe', '.zip' }
+          )
+
+          if (-not ($archivos | Where-Object { $_.Extension -eq '.exe' })) {
+            throw "No se generó ningún instalador .exe."
           }
 
           New-Item -ItemType Directory -Path $salida -Force | Out-Null
-
-          $archivos = Get-ChildItem $release -File -Recurse |
-            Where-Object { $_.Extension -in '.exe', '.zip' }
-
-          if (-not ($archivos | Where-Object { $_.Extension -eq '.exe' })) {
-            throw "La compilación no produjo ningún instalador .exe."
-          }
-
           $archivos | Copy-Item -Destination $salida -Force
-          Get-ChildItem $salida
+
+          Get-ChildItem -Path $salida
 
       - name: Subir instalador
         uses: actions/upload-artifact@v4
