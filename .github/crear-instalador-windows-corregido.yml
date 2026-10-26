@@ -1,0 +1,105 @@
+name: Crear instalador Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Extraer proyecto
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:GITHUB_WORKSPACE "Archivo-Sacramental-Genealogico-v2.1.0-completo.zip"
+          if (!(Test-Path $zip)) {
+            throw "No se encontró el ZIP del proyecto."
+          }
+
+          $destino = Join-Path $env:RUNNER_TEMP "ArchivoSacramental"
+          if (Test-Path $destino) {
+            Remove-Item $destino -Recurse -Force
+          }
+          Expand-Archive -LiteralPath $zip -DestinationPath $destino -Force
+
+          $pkg = Get-ChildItem -Path $destino -Filter package.json -Recurse -File |
+            Select-Object -First 1
+          if (!$pkg) {
+            throw "El ZIP no contiene package.json."
+          }
+
+          "PROJECT_DIR=$($pkg.Directory.FullName)" |
+            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Corregir propiedad duplicada y exportación de App
+        shell: pwsh
+        run: |
+          $app = Join-Path $env:PROJECT_DIR "src/App.tsx"
+          if (!(Test-Path $app)) {
+            throw "No se encontró src/App.tsx en el proyecto extraído."
+          }
+
+          $appText = Get-Content -Path $app -Raw
+          $corregido = [regex]::Replace($appText, "toYear:''\s*,\s*\[key\]:value", "toYear:''")
+          if ($corregido -ne $appText) {
+            Set-Content -Path $app -Value $corregido -Encoding utf8
+            $appText = Get-Content -Path $app -Raw
+            Write-Host "Propiedad duplicada corregida."
+          }
+
+          if ($appText -notmatch '(?m)^\s*export\s+default\b') {
+            if ($appText -match '\b(?:const|let|var|function|class)\s+App\b' -or
+                $appText -match 'export\s*\{[^}]*\bApp\b[^}]*\}') {
+              Add-Content -Path $app -Value "`nexport { App as default };" -Encoding utf8
+              Write-Host "Añadida exportación predeterminada de App."
+            } else {
+              throw "No se encontró una declaración llamada App para corregir la exportación."
+            }
+          }
+
+      - name: Instalar dependencias
+        shell: pwsh
+        run: |
+          Set-Location $env:PROJECT_DIR
+          npm install
+
+      - name: Compilar aplicación
+        shell: pwsh
+        run: |
+          Set-Location $env:PROJECT_DIR
+          npm run build
+
+      - name: Crear instalador de Windows
+        shell: pwsh
+        run: |
+          Set-Location $env:PROJECT_DIR
+          npx electron-builder --win nsis --x64
+
+          $release = Join-Path $env:PROJECT_DIR "release"
+          $exe = Get-ChildItem -Path $release -Filter "*.exe" -File
+          if (!$exe) {
+            throw "La compilación terminó, pero no se encontró ningún instalador .exe en release."
+          }
+          $exe | ForEach-Object { Write-Host "Instalador generado: $($_.FullName)" }
+
+      - name: Guardar instalador como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Archivo-Sacramental-Windows-Installer
+          path: ${{ runner.temp }}/ArchivoSacramental/archivo-sacramental/release/*.exe
+          if-no-files-found: error
+          retention-days: 14
